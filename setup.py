@@ -9,7 +9,7 @@ setup(
     url='https://github.com/zhangdongkun98/optnet',
     description='optnet',
     install_requires=[
-        
+        'rllib',
     ],
 
     include_package_data=True

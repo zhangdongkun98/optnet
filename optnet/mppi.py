@@ -1,7 +1,9 @@
 import rllib
 
 import torch
+import torch.nn as nn
 from torch.distributions import MultivariateNormal
+from torch.optim import Adam
 
 
 '''
@@ -15,7 +17,14 @@ from torch.distributions import MultivariateNormal
 
 
 class MPPI(rllib.template.MethodSingleAgent):
-    def __init__(self, config, writer, dynamics, running_cost, terminal_cost=lambda _: 0):
+    lr_model = 0.0003
+
+    buffer_size = 1000000
+    batch_size = 256
+
+    start_timesteps = 30000
+    
+    def __init__(self, config: rllib.basic.YamlConfig, writer: rllib.basic.Writer):
         '''
             dynamics: function(state, action) -> next_state
             running_cost: function(state) -> cost
@@ -24,19 +33,52 @@ class MPPI(rllib.template.MethodSingleAgent):
 
         super().__init__(config, writer)
 
-        self.actor = Actor(config, dynamics, running_cost, terminal_cost)
+        self.dynamics = config.get('dynamics_cls', Dynamics)(config).to(self.device)
+        self.running_cost = config.get('running_cost', None)
+        self.terminal_cost = config.get('terminal_cost', lambda _: 0)
+
+        self.actor = Actor(config, self.dynamics, self.running_cost, self.terminal_cost)
+
+        self.optimizer = Adam(self.dynamics.parameters(), lr=self.lr_model)
+        self.model_loss = nn.MSELoss()
+        self._replay_buffer = config.get('buffer', rllib.td3.ReplayBuffer)(self.buffer_size, self.batch_size, self.device)
         return
 
 
     def reset(self):
         self.actor.reset()
 
+
+    def update_policy(self):
+        if len(self._replay_buffer) < self.start_timesteps:
+            return
+        super().update_policy()
+
+        '''load data batch'''
+        experience = self._replay_buffer.sample()
+        state = experience.state
+        action = experience.action
+        next_state = experience.next_state
+
+        loss = self.model_loss(self.dynamics(state, action), next_state)
+
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+        
+        self.writer.add_scalar('loss/loss', loss.detach().item(), self.step_update)
+        return
+
+
+    @torch.no_grad()
     def select_action(self, state):
         '''
             state: torch.Size([1, dim_state])
         '''
         super().select_action()
         return self.actor(state.to(self.device))
+
+
 
 
 
@@ -49,12 +91,11 @@ class Actor(rllib.template.Model):
     temperature = 1.0   # positive scalar variable where larger values will allow more exploration
 
     def __init__(self, config, dynamics, running_cost, terminal_cost):
-        super().__init__(config, model_id=0)
+        super().__init__(config)
 
         self.dynamics = dynamics
         self.running_cost = running_cost
         self.terminal_cost = terminal_cost
-
 
         self.noise_mean = torch.zeros((self.dim_action,), dtype=self.dtype, device=self.device)
         self.noise_sigma = torch.diag( self.noise_sigma* torch.ones((self.dim_action,)) ).to(dtype=self.dtype, device=self.device)
@@ -62,13 +103,17 @@ class Actor(rllib.template.Model):
         self.noise_dist = MultivariateNormal(self.noise_mean, covariance_matrix=self.noise_sigma)
 
         self.reset()
-        
+    
     
     def reset(self):
         self.actions = torch.zeros((self.horizon, self.dim_action), device=self.device)
 
 
     def forward(self, state):
+        '''
+            state: torch.Size([1, dim_state])
+            state: torch.Size([1, dim_action])
+        '''
         state = state.expand(self.num_samples, -1)  # torch.Size([num_samples, dim_state])
     
         self.actions = torch.roll(self.actions, -1, dims=0)
@@ -91,7 +136,7 @@ class Actor(rllib.template.Model):
         ### option 2, probably not right
         # self.actions += omega.T.mm(noise.view(self.num_samples, -1)).view(1, self.horizon, self.dim_action)[0]
 
-        action = self.actions[0]
+        action = self.actions[0].view(1,self.dim_action)
         return action
 
 
@@ -118,3 +163,18 @@ class Actor(rllib.template.Model):
         return state_cost + action_cost, noise
 
 
+
+class Dynamics(rllib.template.Model):
+    def __init__(self, config):
+        super().__init__(config)
+
+        self.fc = nn.Sequential(
+            nn.Linear(self.dim_state + self.dim_action, 256), nn.ReLU(),
+            nn.Linear(256, 256), nn.ReLU(),
+            nn.Linear(256, self.dim_state), nn.Tanh(),
+        )
+        self.apply(rllib.utils.init_weights)
+    
+    def forward(self, state, action):
+        delta_state = self.fc(torch.cat([state, action], 1))
+        return state + delta_state

@@ -99,7 +99,7 @@ class Actor(rllib.template.Model):
         self.terminal_cost = terminal_cost
 
         self.noise_mean = torch.zeros((self.dim_action,), dtype=self.dtype, device=self.device)
-        self.noise_sigma = torch.diag( self.noise_sigma* torch.ones((self.dim_action,)) ).to(dtype=self.dtype, device=self.device)
+        self.noise_sigma = torch.diag( torch.full((self.dim_action,), self.noise_sigma, dtype=self.dtype, device=self.device) )
         self.noise_sigma_inv = torch.inverse(self.noise_sigma)
         self.noise_dist = MultivariateNormal(self.noise_mean, covariance_matrix=self.noise_sigma)
 

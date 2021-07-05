@@ -21,7 +21,6 @@ class RealDynamics(rllib.template.Model):
         self.fc = nn.Sequential(
             nn.Linear(1, 1),
         )
-        # self.a = torch.tensor([2], dtype=self.dtype, requires_grad=True)
 
     def forward(self, state, action):
         # true dynamics from gym
@@ -47,12 +46,15 @@ class RealDynamics(rllib.template.Model):
         return next_state
 
 
+class RunningCost(rllib.template.Model):
+    def __init__(self, config):
+        super().__init__(config)
 
-def running_cost(state):
-    theta = rllib.basic.sincos2rad( state[:, 1], state[:, 0] )
-    theta_dt = state[:, 2]
-    cost = angle_normalize(theta) ** 2 + 0.1 * theta_dt ** 2
-    return cost.unsqueeze(1)
+    def forward(self, state):
+        theta = rllib.basic.sincos2rad( state[:, 1], state[:, 0] )
+        theta_dt = state[:, 2]
+        cost = angle_normalize(theta) ** 2 + 0.1 * theta_dt ** 2
+        return cost.unsqueeze(1)
 
 def angle_normalize(x):
     return (((x + np.pi) % (2 * np.pi)) - np.pi)
@@ -85,8 +87,8 @@ def main():
     config.set('dim_state', env.dim_state)
     config.set('dim_action', env.dim_action)
     config.set('device', torch.device('cuda:0' if torch.cuda.is_available() else 'cpu'))
-    # config.set('dynamics_cls', Dynamics)
-    config.set('running_cost', running_cost)
+    config.set('dynamics_cls', RealDynamics)
+    config.set('running_cost_cls', RunningCost)
 
     model_name = Method.__name__ + '-' + env_name
     writer = rllib.basic.create_dir(config, model_name)

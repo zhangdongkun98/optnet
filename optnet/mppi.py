@@ -34,7 +34,7 @@ class MPPI(rllib.template.MethodSingleAgent):
         super().__init__(config, writer)
 
         self.dynamics = config.get('dynamics_cls', Dynamics)(config).to(self.device)
-        self.running_cost = config.get('running_cost', None)
+        self.running_cost = config.get('running_cost_cls', RunningCost)(config).to(self.device)
         self.terminal_cost = config.get('terminal_cost', lambda _: 0)
 
         self.actor = Actor(config, self.dynamics, self.running_cost, self.terminal_cost)
@@ -76,7 +76,8 @@ class MPPI(rllib.template.MethodSingleAgent):
             state: torch.Size([1, dim_state])
         '''
         super().select_action()
-        return self.actor(state.to(self.device))
+        action = self.actor(state.to(self.device))
+        return action
 
 
 
@@ -178,3 +179,16 @@ class Dynamics(rllib.template.Model):
     def forward(self, state, action):
         delta_state = self.fc(torch.cat([state, action], 1))
         return state + delta_state
+
+
+
+class RunningCost(rllib.template.Model):
+    def __init__(self, config):
+        super().__init__(config)
+
+    def forward(self, state):
+        '''
+            state: torch.Size([num_samples, dim_state])
+        '''
+        raise NotImplementedError
+

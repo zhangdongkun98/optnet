@@ -119,7 +119,7 @@ def main():
 
             state = next_state
 
-            method.update_policy()
+            method.update_parameters()
 
             running_reward += reward
             avg_length += 1

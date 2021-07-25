@@ -49,10 +49,10 @@ class MPPI(rllib.template.MethodSingleAgent):
         self.actor.reset()
 
 
-    def update_policy(self):
+    def update_parameters(self):
         if len(self._replay_buffer) < self.start_timesteps:
             return
-        super().update_policy()
+        super().update_parameters()
 
         '''load data batch'''
         experience = self._replay_buffer.sample()

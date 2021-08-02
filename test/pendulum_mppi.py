@@ -71,7 +71,7 @@ def main():
     # render = True
     max_episodes = 10000        # max training episodes
     
-    config = rllib.basic.YamlConfig({}, 'None')
+    config = rllib.basic.YamlConfig()
     args = generate_args()
     config.update(args)
 

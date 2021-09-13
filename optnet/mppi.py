@@ -6,14 +6,14 @@ from torch.distributions import MultivariateNormal
 from torch.optim import Adam
 
 
-'''
+"""
     Model Predictive Path Integral control
     ICRA-2017: Information Theoretic MPC for Model-Based Reinforcement Learning
     Ref: https://github.com/UM-ARM-Lab/pytorch_mppi.git
 
     Notes:
         Currently for deterministic dynamics.
-'''
+"""
 
 
 class MPPI(rllib.template.MethodSingleAgent):
@@ -23,25 +23,29 @@ class MPPI(rllib.template.MethodSingleAgent):
     batch_size = 256
 
     start_timesteps = 30000
+
+    save_model_interval = 200
     
     def __init__(self, config: rllib.basic.YamlConfig, writer: rllib.basic.Writer):
-        '''
+        """
             dynamics: function(state, action) -> next_state
             running_cost: function(state) -> cost
             terminal_cost: function(state) -> cost
-        '''
+        """
 
         super().__init__(config, writer)
 
         self.dynamics = config.get('dynamics_cls', Dynamics)(config).to(self.device)
         self.running_cost = config.get('running_cost_cls', RunningCost)(config).to(self.device)
         self.terminal_cost = config.get('terminal_cost', lambda _: 0)
+        # self.models_to_save = [self.dynamics, self.running_cost]
+        self.models_to_save = [self.dynamics]
 
         self.actor = Actor(config, self.dynamics, self.running_cost, self.terminal_cost)
 
         self.optimizer = Adam(self.dynamics.parameters(), lr=self.lr_model)
         self.model_loss = nn.MSELoss()
-        self._replay_buffer = config.get('buffer', rllib.td3.ReplayBuffer)(self.buffer_size, self.batch_size, self.device)
+        self._memory = config.get('buffer', rllib.buffer.ReplayBuffer)(self.buffer_size, self.batch_size, self.device)
         return
 
 
@@ -50,12 +54,12 @@ class MPPI(rllib.template.MethodSingleAgent):
 
 
     def update_parameters(self):
-        if len(self._replay_buffer) < self.start_timesteps:
+        if len(self._memory) < self.start_timesteps:
             return
         super().update_parameters()
 
         '''load data batch'''
-        experience = self._replay_buffer.sample()
+        experience = self._memory.sample()
         state = experience.state
         action = experience.action
         next_state = experience.next_state
@@ -67,6 +71,11 @@ class MPPI(rllib.template.MethodSingleAgent):
         self.optimizer.step()
         
         self.writer.add_scalar('loss/loss', loss.detach().item(), self.step_update)
+        
+        if self.step_update % self.save_model_interval == 0:
+            self._save_model()
+
+        self.update_callback(locals())
         return
 
 
@@ -76,7 +85,11 @@ class MPPI(rllib.template.MethodSingleAgent):
             state: torch.Size([1, dim_state])
         '''
         super().select_action()
-        action = self.actor(state.to(self.device))
+        
+        if self.step_select < self.start_timesteps:
+            action = torch.Tensor(1,self.dim_action).uniform_(-1,1)
+        else:
+            action = self.actor(state.to(self.device))
         return action
 
 

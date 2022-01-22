@@ -56,7 +56,7 @@ class MPPI(rllib.template.MethodSingleAgent):
     def update_parameters(self):
         if len(self._memory) < self.start_timesteps:
             return
-        super().update_parameters()
+        self.update_parameters_start()
 
         '''load data batch'''
         experience = self._memory.sample()
@@ -84,7 +84,7 @@ class MPPI(rllib.template.MethodSingleAgent):
         '''
             state: torch.Size([1, dim_state])
         '''
-        super().select_action()
+        self.select_action_start()
         
         if self.step_select < self.start_timesteps:
             action = torch.Tensor(1,self.dim_action).uniform_(-1,1)
